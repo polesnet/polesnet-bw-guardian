@@ -54,7 +54,7 @@ func cmdStatus(args []string) {
 
 	for _, uuid := range uuids {
 		rateMbps := currentRateMbps(cfg, uuid)
-		pkgKbps := readIntState(cfg.StateDir, uuid, "pkg")
+		pkgKbps := state.ReadInt(cfg.StateDir, uuid, "pkg")
 		pkgMbps := float64(pkgKbps) * 8 / 1000
 		threshold := computeThreshold(pkgKbps, cfg.OveruseRatio)
 		throttled := boolLabel(state.Read(cfg.StateDir, uuid, "throttled") == "1")
@@ -64,7 +64,7 @@ func cmdStatus(args []string) {
 			continue
 		}
 
-		times := readIntState(cfg.StateDir, uuid, "times")
+		times := state.ReadInt(cfg.StateDir, uuid, "times")
 
 		fmt.Printf("%-38s  %10.2f  %10.2f  %-9s  %-4s  %5d  %10.2f\n",
 			uuid, rateMbps, threshold, throttled, permanent, times, pkgMbps)
@@ -111,14 +111,6 @@ func currentRateMbps(cfg *config.Config, uuid string) float64 {
 	}
 
 	return float64(delta) * 8 / float64(elapsed) / 1_000_000
-}
-
-func readIntState(stateDir, uuid, typ string) int {
-	v, err := strconv.Atoi(state.Read(stateDir, uuid, typ))
-	if err != nil {
-		return 0
-	}
-	return v
 }
 
 func boolLabel(v bool) string {

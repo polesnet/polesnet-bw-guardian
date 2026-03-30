@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -63,6 +64,15 @@ func ListUUIDs(dir string) ([]string, error) {
 		uuids = append(uuids, uuid)
 	}
 	return uuids, nil
+}
+
+// ReadInt returns the integer value of a state file, or 0 if missing/invalid.
+func ReadInt(dir, uuid, typ string) int {
+	v, err := strconv.Atoi(Read(dir, uuid, typ))
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 // FormatState returns the string to write into a .state file.

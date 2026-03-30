@@ -30,6 +30,9 @@ type Config struct {
 	RiskMaxUniqueDsts    int
 	RiskScanThreshold    int
 	RiskInboundThreshold int
+	RiskRelayInbound     int // relay_proxy: min inbound connections
+	RiskRelayOutbound    int // relay_proxy: min outbound connections
+	RiskRelayUniqueDst   int // relay_proxy: min unique dest IPs
 	WebhookURL           string
 }
 
@@ -49,6 +52,9 @@ func Load() *Config {
 		RiskMaxUniqueDsts:    150,
 		RiskScanThreshold:    50,
 		RiskInboundThreshold: 50,
+		RiskRelayInbound:     30,
+		RiskRelayOutbound:    150,
+		RiskRelayUniqueDst:   50,
 	}
 
 	f, err := os.Open(DefaultConfigFile)
@@ -114,6 +120,18 @@ func Load() *Config {
 		case "RISK_INBOUND_THRESHOLD":
 			if v, err := strconv.Atoi(val); err == nil {
 				cfg.RiskInboundThreshold = v
+			}
+		case "RISK_RELAY_INBOUND":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RiskRelayInbound = v
+			}
+		case "RISK_RELAY_OUTBOUND":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RiskRelayOutbound = v
+			}
+		case "RISK_RELAY_UNIQUE_DST":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RiskRelayUniqueDst = v
 			}
 		case "WEBHOOK_URL":
 			cfg.WebhookURL = val

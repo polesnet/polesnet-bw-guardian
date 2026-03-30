@@ -17,7 +17,10 @@ type Alert struct {
 	Timestamp string         `json:"timestamp"` // RFC3339
 }
 
-var wg sync.WaitGroup
+var (
+	wg         sync.WaitGroup
+	httpClient = &http.Client{Timeout: 5 * time.Second}
+)
 
 // SendAsync posts the alert to url in a background goroutine.
 // Failures are silently ignored.
@@ -44,8 +47,7 @@ func send(url string, alert Alert) {
 	if err != nil {
 		return
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := httpClient.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return
 	}

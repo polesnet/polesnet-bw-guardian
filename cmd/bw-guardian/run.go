@@ -45,13 +45,20 @@ func cmdRun() {
 		return
 	}
 
-	// Read conntrack once for all VMs (risk control). Nil entries = silently skip.
+	// Load whitelist once for all VMs.
+	whitelist := loadWhitelistSet(cfg.WhitelistFile)
+
+	// Read conntrack once, build index for O(1) per-VM lookups.
 	ctEntries, _ := conntrack.ParseAll()
+	var ctIndex *conntrack.Index
+	if ctEntries != nil {
+		ctIndex = conntrack.BuildIndex(ctEntries)
+	}
 
 	activeSet := make(map[string]bool, len(uuids))
 	for _, uuid := range uuids {
 		activeSet[uuid] = true
-		if err := processVM(cfg, uuid, ctEntries); err != nil {
+		if err := processVM(cfg, uuid, whitelist, ctIndex); err != nil {
 			writeLog(cfg.LogFile, "ERROR", fmt.Sprintf("processVM %s: %v", uuid, err))
 		}
 	}
@@ -62,14 +69,13 @@ func cmdRun() {
 	webhook.Wait()
 }
 
-func processVM(cfg *config.Config, uuid string, ctEntries []conntrack.Entry) error {
-	// Whitelist check
-	if isWhitelisted(cfg.WhitelistFile, uuid) {
+func processVM(cfg *config.Config, uuid string, whitelist map[string]bool, ctIndex *conntrack.Index) error {
+	if whitelist[uuid] {
 		return nil
 	}
 
 	// Risk control (runs regardless of throttle state)
-	riskCheck(cfg, uuid, ctEntries)
+	riskCheck(cfg, uuid, ctIndex)
 
 	// Get interfaces early — needed for both permanent re-throttle and normal logic.
 	ifaces, err := virsh.GetInterfaces(uuid)
@@ -110,7 +116,7 @@ func processVM(cfg *config.Config, uuid string, ctEntries []conntrack.Entry) err
 			// Already throttled, nothing to do
 			return nil
 		}
-		count := readInt(cfg.StateDir, uuid, "count") + 1
+		count := state.ReadInt(cfg.StateDir, uuid, "count") + 1
 		state.Write(cfg.StateDir, uuid, "count", strconv.Itoa(count))
 
 		if count >= cfg.MaxCount {
@@ -122,7 +128,7 @@ func processVM(cfg *config.Config, uuid string, ctEntries []conntrack.Entry) err
 				}
 			}
 
-			times := readInt(cfg.StateDir, uuid, "times") + 1
+			times := state.ReadInt(cfg.StateDir, uuid, "times") + 1
 			state.Write(cfg.StateDir, uuid, "throttled", "1")
 			state.Write(cfg.StateDir, uuid, "times", strconv.Itoa(times))
 			state.Write(cfg.StateDir, uuid, "count", "0")
@@ -137,7 +143,7 @@ func processVM(cfg *config.Config, uuid string, ctEntries []conntrack.Entry) err
 			}
 		}
 	} else if isThrottled {
-		normal := readInt(cfg.StateDir, uuid, "normal") + 1
+		normal := state.ReadInt(cfg.StateDir, uuid, "normal") + 1
 		state.Write(cfg.StateDir, uuid, "normal", strconv.Itoa(normal))
 
 		if normal >= cfg.NormalCountMax {
@@ -158,7 +164,7 @@ func processVM(cfg *config.Config, uuid string, ctEntries []conntrack.Entry) err
 		}
 	} else {
 		// Normal, not throttled: reset over-limit counter if nonzero
-		if readInt(cfg.StateDir, uuid, "count") != 0 {
+		if state.ReadInt(cfg.StateDir, uuid, "count") != 0 {
 			state.Write(cfg.StateDir, uuid, "count", "0")
 		}
 	}
@@ -256,27 +262,20 @@ func computeThreshold(pkgKbps, overuseRatio int) float64 {
 	return t
 }
 
-func readInt(stateDir, uuid, typ string) int {
-	v, err := strconv.Atoi(state.Read(stateDir, uuid, typ))
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
-func isWhitelisted(whitelistFile, uuid string) bool {
+func loadWhitelistSet(whitelistFile string) map[string]bool {
 	f, err := os.Open(whitelistFile)
 	if err != nil {
-		return false
+		return nil
 	}
 	defer f.Close()
+	set := make(map[string]bool)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) == uuid {
-			return true
+		if line := strings.TrimSpace(scanner.Text()); line != "" {
+			set[line] = true
 		}
 	}
-	return false
+	return set
 }
 
 func cleanupStale(cfg *config.Config, activeSet map[string]bool) {
@@ -297,10 +296,20 @@ func cleanupStale(cfg *config.Config, activeSet map[string]bool) {
 	}
 }
 
+// Risk alert type constants.
+const (
+	riskRelayProxy   = "relay_proxy"
+	riskProxyPattern = "proxy_pattern"
+	riskHighConns    = "high_connections"
+	riskPortScan     = "port_scan"
+	riskRapidCycling = "rapid_cycling"
+	riskProxyInbound = "proxy_inbound"
+)
+
 // riskCheck analyzes conntrack statistics and fires webhook alerts.
 // Each alert type is suppressed for 1 hour per VM to avoid flooding.
-func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
-	if !cfg.RiskEnabled || cfg.WebhookURL == "" || entries == nil {
+func riskCheck(cfg *config.Config, uuid string, ctIndex *conntrack.Index) {
+	if !cfg.RiskEnabled || cfg.WebhookURL == "" || ctIndex == nil {
 		return
 	}
 
@@ -309,7 +318,7 @@ func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
 		return
 	}
 
-	s := conntrack.StatsForIP(entries, ips)
+	s := ctIndex.StatsForIP(ips)
 
 	type check struct {
 		typ    string
@@ -319,8 +328,10 @@ func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
 
 	checks := []check{
 		{
-			typ: "relay_proxy",
-			hit: s.InboundEstablished > 30 && s.OutboundEstablished > 150 && s.UniqueDestIPs > 50,
+			typ: riskRelayProxy,
+			hit: s.InboundEstablished > cfg.RiskRelayInbound &&
+				s.OutboundEstablished > cfg.RiskRelayOutbound &&
+				s.UniqueDestIPs > cfg.RiskRelayUniqueDst,
 			detail: map[string]any{
 				"inbound_established":  s.InboundEstablished,
 				"outbound_established": s.OutboundEstablished,
@@ -328,7 +339,7 @@ func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
 			},
 		},
 		{
-			typ: "proxy_pattern",
+			typ: riskProxyPattern,
 			hit: s.UniqueDestIPs > cfg.RiskMaxUniqueDsts,
 			detail: map[string]any{
 				"unique_dest_ips": s.UniqueDestIPs,
@@ -336,7 +347,7 @@ func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
 			},
 		},
 		{
-			typ: "high_connections",
+			typ: riskHighConns,
 			hit: s.OutboundEstablished > cfg.RiskMaxConns,
 			detail: map[string]any{
 				"outbound_established": s.OutboundEstablished,
@@ -344,7 +355,7 @@ func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
 			},
 		},
 		{
-			typ: "port_scan",
+			typ: riskPortScan,
 			hit: s.SynSentCount > cfg.RiskScanThreshold,
 			detail: map[string]any{
 				"syn_sent":  s.SynSentCount,
@@ -352,7 +363,7 @@ func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
 			},
 		},
 		{
-			typ: "rapid_cycling",
+			typ: riskRapidCycling,
 			hit: s.TimeWaitCount > cfg.RiskMaxConns*2,
 			detail: map[string]any{
 				"time_wait": s.TimeWaitCount,
@@ -360,7 +371,7 @@ func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
 			},
 		},
 		{
-			typ: "proxy_inbound",
+			typ: riskProxyInbound,
 			hit: s.InboundEstablished > cfg.RiskInboundThreshold,
 			detail: map[string]any{
 				"inbound_established": s.InboundEstablished,

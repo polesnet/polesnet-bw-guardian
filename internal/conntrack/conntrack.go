@@ -50,36 +50,71 @@ func ParseAll() ([]Entry, error) {
 	return entries, scanner.Err()
 }
 
-// StatsForIP filters entries by VM IP list and returns aggregated stats.
-func StatsForIP(entries []Entry, ips []string) Stats {
-	ipSet := make(map[string]bool, len(ips))
-	for _, ip := range ips {
-		ipSet[ip] = true
+// Index is a pre-built lookup structure for conntrack entries, keyed by IP.
+// Build once with BuildIndex(), then query per-VM with StatsForIP().
+type Index struct {
+	// outbound stats keyed by source IP
+	outbound map[string]*ipStats
+	// inbound ESTABLISHED count keyed by destination IP
+	inboundEstablished map[string]int
+}
+
+type ipStats struct {
+	established int
+	synSent     int
+	timeWait    int
+	uniqueDst   map[string]bool
+}
+
+// BuildIndex scans all entries once and builds an index keyed by IP.
+// Total work: O(M) where M is len(entries).
+func BuildIndex(entries []Entry) *Index {
+	idx := &Index{
+		outbound:           make(map[string]*ipStats),
+		inboundEstablished: make(map[string]int),
 	}
-
-	uniqueDst := make(map[string]bool)
-	var s Stats
-
 	for _, e := range entries {
-		srcIsVM := ipSet[e.SrcIP]
-		dstIsVM := ipSet[e.DstIP]
+		// Outbound stats by source IP
+		switch e.State {
+		case "ESTABLISHED":
+			s := idx.getOrCreate(e.SrcIP)
+			s.established++
+			s.uniqueDst[e.DstIP] = true
+			idx.inboundEstablished[e.DstIP]++
+		case "SYN_SENT", "SYN_SENT2":
+			idx.getOrCreate(e.SrcIP).synSent++
+		case "TIME_WAIT":
+			idx.getOrCreate(e.SrcIP).timeWait++
+		}
+	}
+	return idx
+}
 
-		if srcIsVM {
-			switch e.State {
-			case "ESTABLISHED":
-				s.OutboundEstablished++
-				uniqueDst[e.DstIP] = true
-			case "SYN_SENT", "SYN_SENT2":
-				s.SynSentCount++
-			case "TIME_WAIT":
-				s.TimeWaitCount++
+func (idx *Index) getOrCreate(ip string) *ipStats {
+	s, ok := idx.outbound[ip]
+	if !ok {
+		s = &ipStats{uniqueDst: make(map[string]bool)}
+		idx.outbound[ip] = s
+	}
+	return s
+}
+
+// StatsForIP aggregates stats for a set of VM IPs. O(len(ips)).
+func (idx *Index) StatsForIP(ips []string) Stats {
+	var s Stats
+	allDst := make(map[string]bool)
+	for _, ip := range ips {
+		if os, ok := idx.outbound[ip]; ok {
+			s.OutboundEstablished += os.established
+			s.SynSentCount += os.synSent
+			s.TimeWaitCount += os.timeWait
+			for dst := range os.uniqueDst {
+				allDst[dst] = true
 			}
 		}
-		if dstIsVM && e.State == "ESTABLISHED" {
-			s.InboundEstablished++
-		}
+		s.InboundEstablished += idx.inboundEstablished[ip]
 	}
-	s.UniqueDestIPs = len(uniqueDst)
+	s.UniqueDestIPs = len(allDst)
 	return s
 }
 
