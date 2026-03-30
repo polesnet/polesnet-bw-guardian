@@ -40,7 +40,7 @@ func cmdStatus() {
 	}
 
 	header := fmt.Sprintf("%-38s  %10s  %10s  %-9s  %-4s  %5s  %10s",
-		"UUID", "RATE(Mbps)", "THRESH(Mbps)", "THROTTLED", "PERM", "TIMES", "PKG(KB/s)")
+		"UUID", "RATE(Mbps)", "THRESH(Mbps)", "THROTTLED", "PERM", "TIMES", "PKG(Mbps)")
 	sep := strings.Repeat("-", len(header))
 	fmt.Println(header)
 	fmt.Println(sep)
@@ -48,13 +48,14 @@ func cmdStatus() {
 	for _, uuid := range uuids {
 		rateMbps := currentRateMbps(cfg, uuid)
 		pkgKbps := readIntState(cfg.StateDir, uuid, "pkg")
+		pkgMbps := float64(pkgKbps) * 8 / 1000
 		threshold := computeThreshold(pkgKbps, cfg.OveruseRatio)
 		throttled := boolLabel(state.Read(cfg.StateDir, uuid, "throttled") == "1")
 		permanent := boolLabel(state.Read(cfg.StateDir, uuid, "permanent") == "1")
 		times := readIntState(cfg.StateDir, uuid, "times")
 
-		fmt.Printf("%-38s  %10.2f  %10.2f  %-9s  %-4s  %5d  %10d\n",
-			uuid, rateMbps, threshold, throttled, permanent, times, pkgKbps)
+		fmt.Printf("%-38s  %10.2f  %10.2f  %-9s  %-4s  %5d  %10.2f\n",
+			uuid, rateMbps, threshold, throttled, permanent, times, pkgMbps)
 	}
 }
 

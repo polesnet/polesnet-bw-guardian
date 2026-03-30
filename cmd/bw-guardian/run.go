@@ -119,8 +119,8 @@ func processVM(cfg *config.Config, uuid string) error {
 			writeLog(cfg.LogFile, "THROTTLE", fmt.Sprintf("%s iface=%s rate=%.2f threshold=%.2f pkg=%d times=%d",
 				uuid, strings.Join(ifaces, ","), rateMbps, threshold, pkgKbps, times))
 
-			// Three-strikes permanent throttle
-			if times >= cfg.MaxThrottleTimes {
+			// Three-strikes permanent throttle (disabled when MaxThrottleTimes <= 0)
+			if cfg.MaxThrottleTimes > 0 && times >= cfg.MaxThrottleTimes {
 				state.Write(cfg.StateDir, uuid, "permanent", "1")
 				writeLog(cfg.LogFile, "PERMANENT", fmt.Sprintf("%s iface=%s times=%d", uuid, strings.Join(ifaces, ","), times))
 			}
