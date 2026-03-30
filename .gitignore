@@ -1,0 +1,15 @@
+# Binaries
+bw-guardian
+bw-guardian-linux-*
+bw-guardian-darwin-*
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Test coverage
+coverage.*
+
+# macOS
+.DS_Store

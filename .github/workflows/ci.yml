@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Verify formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "以下文件格式不符合 gofmt 要求:"
+            gofmt -l .
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build (linux/amd64)
+        run: GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/bw-guardian
+
+      - name: Build (linux/arm64)
+        run: GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/bw-guardian
