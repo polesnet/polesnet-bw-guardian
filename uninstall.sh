@@ -36,6 +36,12 @@ fi
 # Remove lock file
 rm -f /var/run/bw-guardian.lock
 
+# Remove logrotate config
+if [[ -f /etc/logrotate.d/bw-guardian ]]; then
+    rm -f /etc/logrotate.d/bw-guardian
+    echo "已删除: /etc/logrotate.d/bw-guardian"
+fi
+
 # Prompt for state dir
 if [[ -d /var/lib/bw-guardian ]]; then
     read -r -p "是否删除状态目录 /var/lib/bw-guardian？[y/N] " ans

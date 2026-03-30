@@ -87,6 +87,19 @@ if [ ! -f "${CONFIG_DIR}/whitelist" ]; then
     log_info "已创建空白白名单: ${CONFIG_DIR}/whitelist"
 fi
 
+# --- logrotate ---
+cat > /etc/logrotate.d/bw-guardian <<'EOF'
+/var/log/bw-guardian.log {
+    daily
+    rotate 30
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+log_info "已配置日志轮转: /etc/logrotate.d/bw-guardian"
+
 # --- systemd service ---
 cat > "${SYSTEMD_DIR}/bw-guardian.service" <<EOF
 [Unit]

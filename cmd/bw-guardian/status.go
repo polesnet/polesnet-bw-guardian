@@ -12,7 +12,14 @@ import (
 	"github.com/polesnet/bw-guardian/internal/virsh"
 )
 
-func cmdStatus() {
+func cmdStatus(args []string) {
+	onlyThrottled := false
+	for _, a := range args {
+		if a == "--throttled" || a == "-t" {
+			onlyThrottled = true
+		}
+	}
+
 	cfg := config.Load()
 
 	uuids, err := virsh.ListRunningUUIDs()
@@ -52,6 +59,11 @@ func cmdStatus() {
 		threshold := computeThreshold(pkgKbps, cfg.OveruseRatio)
 		throttled := boolLabel(state.Read(cfg.StateDir, uuid, "throttled") == "1")
 		permanent := boolLabel(state.Read(cfg.StateDir, uuid, "permanent") == "1")
+
+		if onlyThrottled && throttled == "no" && permanent == "no" {
+			continue
+		}
+
 		times := readIntState(cfg.StateDir, uuid, "times")
 
 		fmt.Printf("%-38s  %10.2f  %10.2f  %-9s  %-4s  %5d  %10.2f\n",
