@@ -58,13 +58,22 @@ func GetInterfaces(uuid string) ([]string, error) {
 	return ifaces, nil
 }
 
-// GetIPAddresses returns the IPv4 addresses of a VM from virsh domifaddr.
-// Output example:
+// GetIPAddresses returns the IPv4 addresses of a VM.
+// Tries guest-agent first, then falls back to ARP source.
+//
+// Output of `virsh domifaddr --source <src> <uuid>`:
 //
 //	Name       MAC address         Protocol  Address
 //	vnet0      52:54:00:xx:xx:xx   ipv4      192.168.100.10/24
 func GetIPAddresses(uuid string) ([]string, error) {
-	out, err := run("domifaddr", uuid)
+	if ips, _ := domifaddrSource(uuid, "agent"); len(ips) > 0 {
+		return ips, nil
+	}
+	return domifaddrSource(uuid, "arp")
+}
+
+func domifaddrSource(uuid, source string) ([]string, error) {
+	out, err := run("domifaddr", uuid, "--source", source)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +83,6 @@ func GetIPAddresses(uuid string) ([]string, error) {
 			continue
 		}
 		fields := strings.Fields(line)
-		// fields: [ifname, mac, protocol, address/prefix]
 		if len(fields) < 4 || fields[2] != "ipv4" {
 			continue
 		}

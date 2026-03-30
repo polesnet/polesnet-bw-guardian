@@ -57,6 +57,9 @@ func cmdRun() {
 	}
 
 	cleanupStale(cfg, activeSet)
+
+	// Wait for any pending webhook requests before process exits (Type=oneshot).
+	webhook.Wait()
 }
 
 func processVM(cfg *config.Config, uuid string, ctEntries []conntrack.Entry) error {

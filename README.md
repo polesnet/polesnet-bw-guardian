@@ -37,8 +37,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/polesnet/polesnet-bw-guardia
 
 | 命令 | 说明 |
 |:---|:---|
-| `bw-guardian status` | 查看所有 VM 的监控状态（速率、阈值、是否限速） |
+| `bw-guardian status [-t]` | 查看所有 VM 的监控状态；`-t`/`--throttled` 只显示被限速的 |
 | `bw-guardian unblock <uuid>` | 手动解除某台 VM 的限速，包括永久限速 |
+| `bw-guardian whitelist list` | 查看白名单 |
+| `bw-guardian whitelist add <uuid>` | 添加到白名单 |
+| `bw-guardian whitelist remove <uuid>` | 从白名单移除 |
 | `bw-guardian upgrade` | 升级到最新版本 |
 | `bw-guardian run` | 手动触发一次检查（正常由 systemd timer 自动调用） |
 | `bw-guardian version` | 显示版本信息 |
@@ -46,11 +49,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/polesnet/polesnet-bw-guardia
 ### status 输出示例
 
 ```
-UUID                                    RATE(Mbps)  THRESH(Mbps)  THROTTLED  PERM  TIMES  PKG(KB/s)
+UUID                                    RATE(Mbps)  THRESH(Mbps)  THROTTLED  PERM  TIMES  PKG(Mbps)
 ----------------------------------------------------------------------------------------------------
-3a5f1c2e-...                               45.23         80.00  yes        no        2      12500
-8b2d9e7a-...                                2.10         80.00  no         no        0      12500
-c1f04d3b-...                                0.00         10.00  yes        yes       3          0
+3a5f1c2e-...                               45.23         80.00  yes        no        2     100.00
+8b2d9e7a-...                                2.10         80.00  no         no        0     100.00
+c1f04d3b-...                                0.00         10.00  yes        yes       3       0.00
 ```
 
 ## 配置
@@ -70,7 +73,7 @@ MAX_COUNT=10
 # 连续正常几分钟后自动恢复
 NORMAL_COUNT_MAX=30
 
-# 累计降速几次后永久限速
+# 累计降速几次后永久限速（设为 0 禁用三振出局）
 MAX_THROTTLE_TIMES=3
 ```
 
@@ -80,7 +83,30 @@ MAX_THROTTLE_TIMES=3
 threshold = max(套餐带宽(Mbps) × OVERUSE_RATIO%, 10 Mbps)
 ```
 
-白名单文件：`/etc/bw-guardian/whitelist`，每行一个 VM UUID。
+白名单文件：`/etc/bw-guardian/whitelist`，每行一个 VM UUID。可通过 `bw-guardian whitelist` 命令管理。
+
+### 流量风控（可选）
+
+基于 conntrack 连接表分析 VM 行为，检测机场/代理/扫描等异常，通过 Webhook 告警。默认关闭。
+
+```ini
+RISK_ENABLED=false
+RISK_MAX_CONNS=300            # 出向活跃连接数上限
+RISK_MAX_UNIQUE_DSTS=150      # 唯一目标 IP 上限
+RISK_SCAN_THRESHOLD=50        # SYN_SENT 连接数上限
+RISK_INBOUND_THRESHOLD=50     # 入向连接数上限
+WEBHOOK_URL=                  # Webhook 告警 URL（留空则不推送）
+```
+
+检测类型：
+
+| 类型 | 触发条件 |
+|:---|:---|
+| `relay_proxy` | 入向连接 > 30 且出向连接 > 150 且唯一目标 IP > 50（机场特征） |
+| `proxy_pattern` | 唯一目标 IP > `RISK_MAX_UNIQUE_DSTS` |
+| `high_connections` | 出向连接 > `RISK_MAX_CONNS` |
+| `port_scan` | SYN_SENT > `RISK_SCAN_THRESHOLD` |
+| `proxy_inbound` | 入向连接 > `RISK_INBOUND_THRESHOLD` |
 
 ## 查看日志
 

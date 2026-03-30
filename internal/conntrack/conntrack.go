@@ -69,7 +69,7 @@ func StatsForIP(entries []Entry, ips []string) Stats {
 			case "ESTABLISHED":
 				s.OutboundEstablished++
 				uniqueDst[e.DstIP] = true
-			case "SYN_SENT":
+			case "SYN_SENT", "SYN_SENT2":
 				s.SynSentCount++
 			case "TIME_WAIT":
 				s.TimeWaitCount++
@@ -108,8 +108,10 @@ func parseLine(line string) (Entry, bool) {
 		e.State = fields[5]
 	}
 
-	// Parse key=value pairs
-	for _, f := range fields[6:] {
+	// Parse key=value pairs.
+	// For TCP, fields[5] is the state string (no "="), so starting at fields[5]
+	// works for both TCP and UDP — the state string is skipped by the len(kv)!=2 check.
+	for _, f := range fields[5:] {
 		kv := strings.SplitN(f, "=", 2)
 		if len(kv) != 2 {
 			continue

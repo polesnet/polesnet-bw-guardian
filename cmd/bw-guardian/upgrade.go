@@ -56,15 +56,17 @@ func cmdUpgrade() {
 		fmt.Fprintf(os.Stderr, "[ERROR] 无法创建临时文件: %v\n", err)
 		os.Exit(1)
 	}
-	defer out.Close()
 
 	if _, err = io.Copy(out, resp.Body); err != nil {
+		out.Close()
+		os.Remove(tmpFile)
 		fmt.Fprintf(os.Stderr, "[ERROR] 写入临时文件失败: %v\n", err)
 		os.Exit(1)
 	}
 	out.Close()
 
 	if err := os.Chmod(tmpFile, 0755); err != nil {
+		os.Remove(tmpFile)
 		fmt.Fprintf(os.Stderr, "[ERROR] 无法设置权限: %v\n", err)
 		os.Exit(1)
 	}
