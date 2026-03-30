@@ -86,4 +86,3 @@ func GetPkgKbps(uuid string) (int, error) {
 	}
 	return 0, fmt.Errorf("inbound.average not found for %s", uuid)
 }
-
