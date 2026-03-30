@@ -1,46 +1,64 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+# bw-guardian 安装脚本
+# https://github.com/polesnet/polesnet-bw-guardian
+#
+# 用法:
+#   curl -fsSL https://raw.githubusercontent.com/polesnet/polesnet-bw-guardian/main/install.sh | bash
 
-INSTALL_DIR="/usr/local/bin"
+set -e
+
+REPO="polesnet/polesnet-bw-guardian"
+BIN_PATH="/usr/local/bin/bw-guardian"
 CONFIG_DIR="/etc/bw-guardian"
 STATE_DIR="/var/lib/bw-guardian"
 SYSTEMD_DIR="/etc/systemd/system"
 LOG_FILE="/var/log/bw-guardian.log"
 
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
 # --- Root check ---
-if [[ $EUID -ne 0 ]]; then
-    echo "错误: 请以 root 身份运行此脚本" >&2
+if [ "$EUID" -ne 0 ]; then
+    log_error "请使用 root 权限运行"
     exit 1
 fi
 
-# --- Locate binary ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# --- Architecture ---
 ARCH=$(uname -m)
 case "$ARCH" in
-    x86_64)  BIN="${SCRIPT_DIR}/bw-guardian-linux-amd64" ;;
-    aarch64) BIN="${SCRIPT_DIR}/bw-guardian-linux-arm64" ;;
-    *)       BIN="" ;;
+    x86_64)  BIN_ARCH="amd64" ;;
+    aarch64) BIN_ARCH="arm64" ;;
+    *)
+        log_error "不支持的系统架构: $ARCH"
+        exit 1
+        ;;
 esac
 
-if [[ -n "$BIN" && -f "$BIN" ]]; then
-    echo "安装二进制文件: $BIN → ${INSTALL_DIR}/bw-guardian"
-    install -m 755 "$BIN" "${INSTALL_DIR}/bw-guardian"
-elif command -v go &>/dev/null; then
-    echo "未找到预编译二进制，使用 go build 编译..."
-    cd "$SCRIPT_DIR"
-    go build -o "${INSTALL_DIR}/bw-guardian" ./cmd/bw-guardian
-    chmod 755 "${INSTALL_DIR}/bw-guardian"
-else
-    echo "错误: 未找到可用二进制文件，且系统未安装 Go" >&2
+echo "=== bw-guardian 安装 ==="
+echo "架构: $ARCH"
+echo ""
+
+# --- Download binary ---
+BIN_URL="https://github.com/${REPO}/releases/latest/download/bw-guardian-linux-${BIN_ARCH}"
+log_info "下载 bw-guardian ($BIN_ARCH)..."
+if ! curl -fsSL "$BIN_URL" -o "$BIN_PATH"; then
+    log_error "下载失败: $BIN_URL"
     exit 1
 fi
+chmod +x "$BIN_PATH"
+log_info "已安装到 $BIN_PATH"
 
-# --- Create directories ---
+# --- Directories ---
 mkdir -p "$CONFIG_DIR" "$STATE_DIR"
-echo "已创建目录: $CONFIG_DIR, $STATE_DIR"
 
-# --- Default config file ---
-if [[ ! -f "${CONFIG_DIR}/config" ]]; then
+# --- Default config ---
+if [ ! -f "${CONFIG_DIR}/config" ]; then
     cat > "${CONFIG_DIR}/config" <<'EOF'
 # bw-guardian 配置文件
 # 超过套餐带宽的百分比算高占用（默认 80%）
@@ -58,17 +76,15 @@ NORMAL_COUNT_MAX=30
 # 累计降速几次后永久限速
 MAX_THROTTLE_TIMES=3
 EOF
-    echo "已创建默认配置: ${CONFIG_DIR}/config"
+    log_info "已创建默认配置: ${CONFIG_DIR}/config"
 else
-    echo "配置文件已存在，跳过: ${CONFIG_DIR}/config"
+    log_warn "配置文件已存在，跳过: ${CONFIG_DIR}/config"
 fi
 
 # --- Whitelist ---
-if [[ ! -f "${CONFIG_DIR}/whitelist" ]]; then
+if [ ! -f "${CONFIG_DIR}/whitelist" ]; then
     touch "${CONFIG_DIR}/whitelist"
-    echo "已创建空白白名单: ${CONFIG_DIR}/whitelist"
-else
-    echo "白名单已存在，跳过: ${CONFIG_DIR}/whitelist"
+    log_info "已创建空白白名单: ${CONFIG_DIR}/whitelist"
 fi
 
 # --- systemd service ---
@@ -80,12 +96,12 @@ Wants=libvirtd.service
 
 [Service]
 Type=oneshot
-ExecStart=${INSTALL_DIR}/bw-guardian run
+ExecStart=${BIN_PATH} run
 StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}
 EOF
 
-# --- systemd timer (every minute) ---
+# --- systemd timer ---
 cat > "${SYSTEMD_DIR}/bw-guardian.timer" <<'EOF'
 [Unit]
 Description=Run bw-guardian every minute
@@ -101,18 +117,16 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now bw-guardian.timer
-echo "已启用 systemd timer: bw-guardian.timer"
+log_info "已启用 systemd timer"
 
 echo ""
-echo "✓ bw-guardian 安装完成"
+log_info "bw-guardian 安装完成"
+echo ""
 echo "  配置文件: ${CONFIG_DIR}/config"
 echo "  白名单:   ${CONFIG_DIR}/whitelist"
-echo "  状态目录: ${STATE_DIR}"
 echo "  日志文件: ${LOG_FILE}"
-echo "  Timer:    ${SYSTEMD_DIR}/bw-guardian.timer"
 echo ""
-echo "  查看 timer 状态: systemctl status bw-guardian.timer"
-echo "  手动运行一次:    systemctl start bw-guardian.service"
-echo "  查看日志:        journalctl -u bw-guardian.service -f"
 echo "  查看状态:        bw-guardian status"
 echo "  解除限速:        bw-guardian unblock <uuid>"
+echo "  查看日志:        journalctl -u bw-guardian.service -f"
+echo "  手动触发一次:    systemctl start bw-guardian.service"

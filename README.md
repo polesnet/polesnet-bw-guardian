@@ -10,20 +10,16 @@
 
 ## 安装
 
-从 [Releases](../../releases) 下载对应架构的二进制文件，与 `install.sh` 放在同一目录后执行：
-
 ```bash
-sudo bash install.sh
+curl -fsSL https://raw.githubusercontent.com/polesnet/polesnet-bw-guardian/main/install.sh | bash
 ```
 
-install.sh 会自动完成：
+自动完成：
 
-- 安装二进制到 `/usr/local/bin/bw-guardian`
+- 从 GitHub Releases 下载对应架构的二进制到 `/usr/local/bin/bw-guardian`
 - 创建配置目录 `/etc/bw-guardian/`（包含默认配置和空白名单）
 - 创建状态目录 `/var/lib/bw-guardian/`
 - 注册并启动 systemd timer（每分钟触发一次）
-
-若未找到预编译二进制，会尝试在本地 `go build`。
 
 ## 卸载
 
