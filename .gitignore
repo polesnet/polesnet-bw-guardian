@@ -1,7 +1,7 @@
 # Binaries
-bw-guardian
-bw-guardian-linux-*
-bw-guardian-darwin-*
+/bw-guardian
+/bw-guardian-linux-*
+/bw-guardian-darwin-*
 
 # IDE
 .idea/

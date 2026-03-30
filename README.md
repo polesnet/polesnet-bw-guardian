@@ -39,6 +39,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/polesnet/polesnet-bw-guardia
 |:---|:---|
 | `bw-guardian status` | 查看所有 VM 的监控状态（速率、阈值、是否限速） |
 | `bw-guardian unblock <uuid>` | 手动解除某台 VM 的限速，包括永久限速 |
+| `bw-guardian upgrade` | 升级到最新版本 |
 | `bw-guardian run` | 手动触发一次检查（正常由 systemd timer 自动调用） |
 | `bw-guardian version` | 显示版本信息 |
 

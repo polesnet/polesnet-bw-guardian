@@ -3,7 +3,7 @@
 # https://github.com/polesnet/polesnet-bw-guardian
 #
 # 用法:
-#   curl -fsSL https://raw.githubusercontent.com/polesnet/polesnet-bw-guardian/main/install.sh | bash
+#   bash <(curl -fsSL https://raw.githubusercontent.com/polesnet/polesnet-bw-guardian/main/install.sh)
 
 set -e
 
@@ -128,5 +128,6 @@ echo "  日志文件: ${LOG_FILE}"
 echo ""
 echo "  查看状态:        bw-guardian status"
 echo "  解除限速:        bw-guardian unblock <uuid>"
+echo "  升级版本:        bw-guardian upgrade"
 echo "  查看日志:        journalctl -u bw-guardian.service -f"
 echo "  手动触发一次:    systemctl start bw-guardian.service"
