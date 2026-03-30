@@ -23,6 +23,14 @@ type Config struct {
 	StateDir         string
 	LogFile          string
 	WhitelistFile    string
+
+	// Risk control
+	RiskEnabled          bool
+	RiskMaxConns         int
+	RiskMaxUniqueDsts    int
+	RiskScanThreshold    int
+	RiskInboundThreshold int
+	WebhookURL           string
 }
 
 func Load() *Config {
@@ -35,6 +43,12 @@ func Load() *Config {
 		StateDir:         DefaultStateDir,
 		LogFile:          DefaultLogFile,
 		WhitelistFile:    DefaultWhitelistFile,
+
+		RiskEnabled:          false,
+		RiskMaxConns:         300,
+		RiskMaxUniqueDsts:    150,
+		RiskScanThreshold:    50,
+		RiskInboundThreshold: 50,
 	}
 
 	f, err := os.Open(DefaultConfigFile)
@@ -83,6 +97,26 @@ func Load() *Config {
 			cfg.LogFile = val
 		case "WHITELIST_FILE":
 			cfg.WhitelistFile = val
+		case "RISK_ENABLED":
+			cfg.RiskEnabled = val == "true" || val == "1"
+		case "RISK_MAX_CONNS":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RiskMaxConns = v
+			}
+		case "RISK_MAX_UNIQUE_DSTS":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RiskMaxUniqueDsts = v
+			}
+		case "RISK_SCAN_THRESHOLD":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RiskScanThreshold = v
+			}
+		case "RISK_INBOUND_THRESHOLD":
+			if v, err := strconv.Atoi(val); err == nil {
+				cfg.RiskInboundThreshold = v
+			}
+		case "WEBHOOK_URL":
+			cfg.WebhookURL = val
 		}
 	}
 

@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/polesnet/bw-guardian/internal/config"
+	"github.com/polesnet/bw-guardian/internal/conntrack"
 	"github.com/polesnet/bw-guardian/internal/state"
 	"github.com/polesnet/bw-guardian/internal/tc"
 	"github.com/polesnet/bw-guardian/internal/virsh"
+	"github.com/polesnet/bw-guardian/internal/webhook"
 )
 
 func cmdRun() {
@@ -43,10 +45,13 @@ func cmdRun() {
 		return
 	}
 
+	// Read conntrack once for all VMs (risk control). Nil entries = silently skip.
+	ctEntries, _ := conntrack.ParseAll()
+
 	activeSet := make(map[string]bool, len(uuids))
 	for _, uuid := range uuids {
 		activeSet[uuid] = true
-		if err := processVM(cfg, uuid); err != nil {
+		if err := processVM(cfg, uuid, ctEntries); err != nil {
 			writeLog(cfg.LogFile, "ERROR", fmt.Sprintf("processVM %s: %v", uuid, err))
 		}
 	}
@@ -54,11 +59,14 @@ func cmdRun() {
 	cleanupStale(cfg, activeSet)
 }
 
-func processVM(cfg *config.Config, uuid string) error {
+func processVM(cfg *config.Config, uuid string, ctEntries []conntrack.Entry) error {
 	// Whitelist check
 	if isWhitelisted(cfg.WhitelistFile, uuid) {
 		return nil
 	}
+
+	// Risk control (runs regardless of throttle state)
+	riskCheck(cfg, uuid, ctEntries)
 
 	// Get interfaces early — needed for both permanent re-throttle and normal logic.
 	ifaces, err := virsh.GetInterfaces(uuid)
@@ -283,6 +291,105 @@ func cleanupStale(cfg *config.Config, activeSet map[string]bool) {
 			continue
 		}
 		state.DeleteAll(cfg.StateDir, uuid)
+	}
+}
+
+// riskCheck analyzes conntrack statistics and fires webhook alerts.
+// Each alert type is suppressed for 1 hour per VM to avoid flooding.
+func riskCheck(cfg *config.Config, uuid string, entries []conntrack.Entry) {
+	if !cfg.RiskEnabled || cfg.WebhookURL == "" || entries == nil {
+		return
+	}
+
+	ips, err := virsh.GetIPAddresses(uuid)
+	if err != nil || len(ips) == 0 {
+		return
+	}
+
+	s := conntrack.StatsForIP(entries, ips)
+
+	type check struct {
+		typ    string
+		hit    bool
+		detail map[string]any
+	}
+
+	checks := []check{
+		{
+			typ: "relay_proxy",
+			hit: s.InboundEstablished > 30 && s.OutboundEstablished > 150 && s.UniqueDestIPs > 50,
+			detail: map[string]any{
+				"inbound_established":  s.InboundEstablished,
+				"outbound_established": s.OutboundEstablished,
+				"unique_dest_ips":      s.UniqueDestIPs,
+			},
+		},
+		{
+			typ: "proxy_pattern",
+			hit: s.UniqueDestIPs > cfg.RiskMaxUniqueDsts,
+			detail: map[string]any{
+				"unique_dest_ips": s.UniqueDestIPs,
+				"threshold":       cfg.RiskMaxUniqueDsts,
+			},
+		},
+		{
+			typ: "high_connections",
+			hit: s.OutboundEstablished > cfg.RiskMaxConns,
+			detail: map[string]any{
+				"outbound_established": s.OutboundEstablished,
+				"threshold":            cfg.RiskMaxConns,
+			},
+		},
+		{
+			typ: "port_scan",
+			hit: s.SynSentCount > cfg.RiskScanThreshold,
+			detail: map[string]any{
+				"syn_sent":  s.SynSentCount,
+				"threshold": cfg.RiskScanThreshold,
+			},
+		},
+		{
+			typ: "rapid_cycling",
+			hit: s.TimeWaitCount > cfg.RiskMaxConns*2,
+			detail: map[string]any{
+				"time_wait": s.TimeWaitCount,
+				"threshold": cfg.RiskMaxConns * 2,
+			},
+		},
+		{
+			typ: "proxy_inbound",
+			hit: s.InboundEstablished > cfg.RiskInboundThreshold,
+			detail: map[string]any{
+				"inbound_established": s.InboundEstablished,
+				"threshold":           cfg.RiskInboundThreshold,
+			},
+		},
+	}
+
+	now := time.Now().Unix()
+	for _, c := range checks {
+		if !c.hit {
+			continue
+		}
+		// Suppress repeated alerts: check last alert timestamp (1 hour cooldown)
+		stateKey := "risk_" + c.typ
+		lastStr := state.Read(cfg.StateDir, uuid, stateKey)
+		if lastStr != "" {
+			if last, err := strconv.ParseInt(lastStr, 10, 64); err == nil {
+				if now-last < 3600 {
+					continue
+				}
+			}
+		}
+		state.Write(cfg.StateDir, uuid, stateKey, strconv.FormatInt(now, 10))
+
+		writeLog(cfg.LogFile, "RISK", fmt.Sprintf("%s type=%s %v", uuid, c.typ, c.detail))
+		webhook.SendAsync(cfg.WebhookURL, webhook.Alert{
+			Event:  "risk_alert",
+			UUID:   uuid,
+			Type:   c.typ,
+			Detail: c.detail,
+		})
 	}
 }
 

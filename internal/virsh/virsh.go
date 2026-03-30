@@ -58,6 +58,37 @@ func GetInterfaces(uuid string) ([]string, error) {
 	return ifaces, nil
 }
 
+// GetIPAddresses returns the IPv4 addresses of a VM from virsh domifaddr.
+// Output example:
+//
+//	Name       MAC address         Protocol  Address
+//	vnet0      52:54:00:xx:xx:xx   ipv4      192.168.100.10/24
+func GetIPAddresses(uuid string) ([]string, error) {
+	out, err := run("domifaddr", uuid)
+	if err != nil {
+		return nil, err
+	}
+	var ips []string
+	for i, line := range strings.Split(out, "\n") {
+		if i < 2 {
+			continue
+		}
+		fields := strings.Fields(line)
+		// fields: [ifname, mac, protocol, address/prefix]
+		if len(fields) < 4 || fields[2] != "ipv4" {
+			continue
+		}
+		addr := fields[3]
+		if idx := strings.Index(addr, "/"); idx >= 0 {
+			addr = addr[:idx]
+		}
+		if addr != "" {
+			ips = append(ips, addr)
+		}
+	}
+	return ips, nil
+}
+
 // GetPkgKbps reads the inbound.average (KB/s) from domiftune for the first interface.
 // Returns 0 if unavailable.
 func GetPkgKbps(uuid string) (int, error) {

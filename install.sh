@@ -75,6 +75,19 @@ NORMAL_COUNT_MAX=30
 
 # 累计降速几次后永久限速
 MAX_THROTTLE_TIMES=3
+
+# --- 流量风控（默认关闭）---
+RISK_ENABLED=false
+# 出向活跃连接数上限（机场轻松破千，个人用一般不超过50）
+RISK_MAX_CONNS=300
+# 唯一目标 IP 上限（个人用1分钟难以访问150个不同IP）
+RISK_MAX_UNIQUE_DSTS=150
+# SYN_SENT 连接数上限（超出视为端口扫描）
+RISK_SCAN_THRESHOLD=50
+# 入向连接数上限（50个不同客户端接入即视为在卖代理服务）
+RISK_INBOUND_THRESHOLD=50
+# Webhook 告警 URL（留空则不推送）
+WEBHOOK_URL=
 EOF
     log_info "已创建默认配置: ${CONFIG_DIR}/config"
 else
